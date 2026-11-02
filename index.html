@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Polar Align – Căn cực tracker</title>
+<style>
+:root{--bg:#100000;--fg:#e53935;--dim:#5a1a1a;--ok:#ff8a80;color-scheme:dark;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-mode="day"]){--bg:#100000;--fg:#e53935;--dim:#5a1a1a;--ok:#ff8a80}}
+:root[data-mode="day"]{--bg:#101418;--fg:#e0e0e0;--dim:#444c55;--ok:#4caf50}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+display:flex;flex-direction:column;align-items:center;padding:16px;min-height:100vh}
+main{width:100%;max-width:480px}
+h1{font-size:20px;text-align:center;margin:4px 0 10px}
+.tabs{display:flex;gap:8px}
+button,input,summary{font:inherit;color:var(--fg)}
+button{flex:1;background:var(--dim);border:0;border-radius:8px;padding:10px;cursor:pointer}
+button.on{outline:2px solid var(--fg)}
+#instr{font-size:14px;text-align:center;margin:10px 0}
+canvas{display:block;margin:0 auto;max-width:100%}
+#readout{font-size:26px;font-weight:700;text-align:center;margin:8px 0}
+#info{font-size:13px;text-align:center;white-space:pre-line;min-height:3.6em}
+details{margin-top:12px;font-size:14px}
+summary{cursor:pointer;padding:6px 0}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0}
+input[type=number]{width:110px;background:transparent;border:1px solid var(--dim);border-radius:6px;padding:6px}
+input[type=range]{flex:1;accent-color:var(--fg)}
+#start{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;padding:24px;text-align:center;z-index:5}
+#start button{flex:none;font-size:20px;padding:14px 28px;outline:2px solid var(--fg)}
+#msg{font-size:13px;color:var(--ok);text-align:center;margin-top:8px}
+select{background:var(--bg);border:1px solid var(--dim);border-radius:8px;padding:8px;font:inherit;color:var(--fg)}
+.lang{text-align:center;margin-bottom:8px}#intro{white-space:pre-line}
+.tabs button{flex:1;min-width:0;height:52px;padding:4px 6px;font-size:13px;font-weight:700;line-height:1.15;background:#2a0808;border:2px solid var(--fg);border-radius:16px;cursor:pointer}
+.tabs button.on{background:var(--dim);border-width:3px}
+:root[data-mode="day"] .tabs button{color:#fff;background:#2b323b;border-color:#fff}
+:root[data-mode="day"] .tabs button.on{background:var(--dim)}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Polar Align">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#001024">
+</head>
+<body>
+<div id="start">
+  <h1>Polar Align</h1>
+  <select class="langsel" aria-label="Language"></select>
+  <p id="intro" data-i="intro"></p>
+  <button id="go" data-i="go"></button>
+  <p style="font-size:13px" data-i="perm"></p>
+</div>
+<main>
+  <div class="lang"><select class="langsel" aria-label="Language"></select></div>
+  <h1 id="title"></h1>
+  <div class="tabs">
+    <button id="t1" data-i="t1"></button>
+    <button id="t2" data-i="t2"></button>
+    <button id="mode" data-i="mode"></button>
+  </div>
+  <p id="instr"></p>
+  <canvas id="cv"></canvas>
+  <div id="readout">–</div>
+  <div id="info"></div>
+  <div id="msg"></div>
+  <details>
+    <summary data-i="set"></summary>
+    <label><span data-i="tilt"></span><input id="tilt" type="number" step="0.1" value="21"></label>
+    <label><span data-i="lat"></span><input id="lat" type="number" step="0.001" value="21.03"></label>
+    <label><span data-i="lon"></span><input id="lon" type="number" step="0.001" value="105.85"></label>
+    <label><span data-i="decl"></span><input id="decl" type="number" step="0.1" value="0"></label>
+    <p style="font-size:12px" data-i="dnote"></p>
+  </details>
+  <details>
+    <summary data-i="demo"></summary>
+    <label>Alpha<input id="sa" type="range" min="0" max="360" value="0"></label>
+    <label>Beta<input id="sb" type="range" min="-90" max="90" value="0"></label>
+    <label>Gamma<input id="sg" type="range" min="-90" max="90" value="0"></label>
+  </details>
+  <details>
+    <summary>Diagnostics (Safari)</summary>
+    <pre id="diag" style="font-size:12px;white-space:pre-wrap;margin:6px 0"></pre>
+  </details>
+</main>
+<script>
+const D=Math.PI/180, $=id=>document.getElementById(id);
+const n360=a=>((a%360)+360)%360, n180=a=>{a=n360(a);return a>180?a-360:a};
+const DG={ev:0,perm:'n/a',geo:'-'};
+let step=1, S={tx:0,pitch:0,sh:0,ch:1,hasT:false,hasH:false}, raf=0;
+
+/* ---- cài đặt lưu local ---- */
+const ids=['tilt','lat','lon','decl'];
+try{ids.forEach(i=>{const v=localStorage.getItem('pa_'+i);if(v!==null)$(i).value=v})}catch(e){}
+ids.forEach(i=>$(i).addEventListener('input',()=>{try{localStorage.setItem('pa_'+i,$(i).value)}catch(e){}req()}));
+const val=i=>parseFloat($(i).value)||0;
+
+/* ---- Polaris ---- */
+function polarisAz(lat,lon,t){
+  const d=t/864e5+2440587.5-2451545, yrs=d/365.25;
+  const ra=37.9546+0.2655*yrs, dec=(89.2641+0.00352*yrs)*D, la=lat*D;
+  const gm=n360(280.46061837+360.98564736629*d), H=(n360(gm+lon)-ra)*D;
+  return n360(Math.atan2(-Math.cos(dec)*Math.sin(H),Math.sin(dec)*Math.cos(la)-Math.cos(dec)*Math.sin(la)*Math.cos(H))/D);
+}
+const polarisOffset=t=>90-(89.2641+0.00352*((t/864e5+2440587.5-2451545)/365.25));
+
+/* ---- cảm biến ---- */
+function onOri(e,abs){
+  if(e.beta==null||e.gamma==null)return;
+  DG.ev++;DG.b=e.beta;DG.g=e.gamma;DG.a=e.alpha;DG.w=e.webkitCompassHeading;DG.wa=e.webkitCompassAccuracy;DG.abs=e.absolute;
+  const b=e.beta*D,g=e.gamma*D;
+  // vector "lên" trong hệ toạ độ máy: ux = -cosβ·sinγ, uy = sinβ
+  const tx=Math.asin(Math.max(-1,Math.min(1,-Math.cos(b)*Math.sin(g))))/D;
+  const pitch=Math.asin(Math.max(-1,Math.min(1,Math.sin(b))))/D;
+  if(!S.hasT){S.tx=tx;S.pitch=pitch;S.hasT=true}else{S.tx+=.2*(tx-S.tx);S.pitch+=.2*(pitch-S.pitch)}
+  let h=null;
+  if(e.webkitCompassHeading!=null&&e.webkitCompassHeading>=0&&!(e.webkitCompassAccuracy<0))h=e.webkitCompassHeading;          // iOS
+  else if((abs||e.absolute===true)&&e.alpha!=null)h=n360(360-e.alpha); // Android (tuyệt đối)
+  if(h!=null){const s=Math.sin(h*D),c=Math.cos(h*D);
+    if(!S.hasH){S.sh=s;S.ch=c;S.hasH=true}else{S.sh+=.15*(s-S.sh);S.ch+=.15*(c-S.ch)}}
+  req();
+}
+async function start(){
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
+      const r=await DeviceOrientationEvent.requestPermission();DG.perm=r;
+      if(r!=='granted'){$('msg').textContent=t('m1');}
+    }
+  }catch(e){$('msg').textContent=t('m1')+' '+e.message}
+  window.addEventListener('deviceorientationabsolute',e=>onOri(e,true));
+  window.addEventListener('deviceorientation',e=>onOri(e,false));
+  try{navigator.geolocation.getCurrentPosition(p=>{
+    $('lat').value=p.coords.latitude.toFixed(4);$('lon').value=p.coords.longitude.toFixed(4);DG.geo='ok';req()},e=>{DG.geo='error '+e.code;req()},{enableHighAccuracy:true})}catch(e){}
+  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
+  $('start').style.display='none';
+  setTimeout(()=>{if(!S.hasT)$('msg').textContent=t('m2')},3000);
+}
+$('go').onclick=start;
+['sa','sb','sg'].forEach(i=>$(i).addEventListener('input',()=>onOri({alpha:+$('sa').value,beta:+$('sb').value,gamma:+$('sg').value,absolute:true},true)));
+
+const L={
+vi:{intro:"Căn cực tracker bằng cảm biến điện thoại:\nBước 1 cân góc nghiêng (giọt nước), Bước 2 căn hướng Polaris.",go:"Bắt đầu",perm:"Cần cho phép quyền cảm biến chuyển động/la bàn và vị trí.",t1:"Bước 1 · Cân góc",t2:"Bước 2 · Hướng Bắc",mode:"Đỏ/Sáng",set:"Cài đặt",tilt:"Góc nghiêng mục tiêu (°)",lat:"Vĩ độ (°, Bắc +)",lon:"Kinh độ (°, Đông +)",decl:"Lệch từ (°, Đông +)",dnote:"Độ lệch từ lấy từ máy tính NOAA “Magnetic Field Calculator” theo vị trí của bạn. Để 0 nếu chưa biết (sai số thường 0–3°).",demo:"Chế độ thử (không cần cảm biến)",h1:"BƯỚC 1 · CÂN GÓC {T}°",h2:"BƯỚC 2 · CĂN HƯỚNG POLARIS",i1:"Đặt điện thoại (màn hình hướng lên) lên trục cực của tracker, cạnh TRÊN hướng về phía Bắc. Chỉnh độ cao cực cho máy nghiêng đúng {T}° và cạnh ngang không lệch trái/phải: bong bóng vào giữa vòng là đúng.",i2:"Giữ nguyên điện thoại trên trục cực, cạnh TRÊN hướng về phía Bắc. Xoay cả tracker/tripod theo phương ngang cho mốc ★ khớp mũi tên trên cùng. Để xa kim loại và nam châm.",w1:"Chờ cảm biến…",ok1:"ĐÚNG {T}° ✔",off:"Lệch {x}°",w2:"Chờ la bàn…",ok2:"ĐÃ HƯỚNG POLARIS ✔",rr:"Xoay PHẢI ↻ {x}°",rl:"Xoay TRÁI ↺ {x}°",c1:"Góc nghiêng hiện tại: {p}° (mục tiêu {T}°)\nLệch trái/phải: {e}° (cần < 0.3°)",c2:"Hướng hiện tại (Bắc thật): {h}°\nAzimuth Polaris: {a}° (cách cực {o}°)",x1:"⚠ Góc nghiêng lệch so với mục tiêu – quay lại Bước 1.",x2:"⚠ Chưa nhập độ lệch từ: đang căn theo Bắc từ.",m1:"Bạn đã từ chối quyền cảm biến.",m2:"Chưa nhận được dữ liệu cảm biến. Hãy mở bằng HTTPS trên điện thoại và cho phép quyền chuyển động; trên máy tính dùng “Chế độ thử”.",cp:"B Đ N T"},
+en:{intro:"Polar-align your tracker with your phone’s sensors.\nStep 1: set the tilt (bubble level). Step 2: aim at Polaris.",go:"Start",perm:"Allow motion/compass and location access.",t1:"Step 1 · Tilt",t2:"Step 2 · North",mode:"Red/Day",set:"Settings",tilt:"Target tilt (°)",lat:"Latitude (°, N +)",lon:"Longitude (°, E +)",decl:"Declination (°, E +)",dnote:"Get declination from NOAA’s Magnetic Field Calculator. Leave 0 if unknown (error 0–3°).",demo:"Test mode (no sensors)",h1:"STEP 1 · SET {T}° TILT",h2:"STEP 2 · AIM AT POLARIS",i1:"Lay the phone (screen up) on the tracker’s polar axis, top edge pointing north. Adjust the polar altitude until the tilt is {T}° with no sideways lean: bubble in the centre ring means correct.",i2:"Keep the phone on the polar axis, top edge pointing north. Turn the whole tracker/tripod horizontally until the ★ meets the top arrow. Keep away from metal and magnets.",w1:"Waiting for sensor…",ok1:"CORRECT {T}° ✔",off:"Off by {x}°",w2:"Waiting for compass…",ok2:"AIMED AT POLARIS ✔",rr:"Turn RIGHT ↻ {x}°",rl:"Turn LEFT ↺ {x}°",c1:"Current tilt: {p}° (target {T}°)\nSideways: {e}° (need < 0.3°)",c2:"Heading (true north): {h}°\nPolaris azimuth: {a}° ({o}° from the pole)",x1:"⚠ Tilt is off target – go back to Step 1.",x2:"⚠ Declination not set: aligning to magnetic north.",m1:"Sensor permission denied.",m2:"No sensor data. Open over HTTPS on a phone and allow motion access; on a computer use Test mode.",cp:"N E S W"},
+fr:{intro:"Alignez la monture de suivi avec les capteurs du téléphone.\nÉtape 1 : régler l’inclinaison (niveau à bulle). Étape 2 : viser Polaris.",go:"Démarrer",perm:"Autorisez les capteurs de mouvement/boussole et la localisation.",t1:"Étape 1 · Inclinaison",t2:"Étape 2 · Nord",mode:"Rouge/Jour",set:"Réglages",tilt:"Inclinaison cible (°)",lat:"Latitude (°, N +)",lon:"Longitude (°, E +)",decl:"Déclinaison (°, E +)",dnote:"Obtenez la déclinaison avec le Magnetic Field Calculator de la NOAA. Laissez 0 si inconnue (erreur 0–3°).",demo:"Mode test (sans capteurs)",h1:"ÉTAPE 1 · INCLINAISON {T}°",h2:"ÉTAPE 2 · VISER POLARIS",i1:"Posez le téléphone (écran vers le haut) sur l’axe polaire, bord supérieur vers le nord. Réglez la hauteur du pôle jusqu’à {T}° sans inclinaison latérale : bulle dans le cercle central = correct.",i2:"Gardez le téléphone sur l’axe polaire, bord supérieur vers le nord. Tournez tout le support horizontalement jusqu’à ce que l’★ rejoigne la flèche du haut. Loin des métaux et aimants.",w1:"En attente du capteur…",ok1:"{T}° CORRECT ✔",off:"Écart de {x}°",w2:"En attente de la boussole…",ok2:"POLARIS VISÉE ✔",rr:"Tourner à DROITE ↻ {x}°",rl:"Tourner à GAUCHE ↺ {x}°",c1:"Inclinaison actuelle : {p}° (cible {T}°)\nLatéral : {e}° (il faut < 0,3°)",c2:"Cap (nord vrai) : {h}°\nAzimut de Polaris : {a}° ({o}° du pôle)",x1:"⚠ Inclinaison hors cible – retour à l’étape 1.",x2:"⚠ Déclinaison non saisie : alignement sur le nord magnétique.",m1:"Autorisation des capteurs refusée.",m2:"Aucune donnée de capteur. Ouvrez en HTTPS sur un téléphone et autorisez le mouvement ; sur ordinateur, utilisez le mode test.",cp:"N E S O"},
+de:{intro:"Richte deine Nachführung mit den Handy-Sensoren polar aus.\nSchritt 1: Neigung einstellen (Libelle). Schritt 2: auf Polaris ausrichten.",go:"Start",perm:"Bewegungs-/Kompasssensor und Standort erlauben.",t1:"Schritt 1 · Neigung",t2:"Schritt 2 · Nord",mode:"Rot/Tag",set:"Einstellungen",tilt:"Zielneigung (°)",lat:"Breite (°, N +)",lon:"Länge (°, O +)",decl:"Missweisung (°, O +)",dnote:"Missweisung im NOAA Magnetic Field Calculator nachschlagen. Unbekannt: 0 lassen (Fehler 0–3°).",demo:"Testmodus (ohne Sensoren)",h1:"SCHRITT 1 · {T}° NEIGUNG",h2:"SCHRITT 2 · AUF POLARIS AUSRICHTEN",i1:"Handy (Display oben) auf die Polachse legen, Oberkante nach Norden. Polhöhe verstellen, bis {T}° erreicht sind und keine Seitenneigung bleibt: Blase im Mittelkreis = richtig.",i2:"Handy auf der Polachse lassen, Oberkante nach Norden. Gesamte Montierung/Stativ waagerecht drehen, bis der ★ am oberen Pfeil steht. Abstand zu Metall und Magneten halten.",w1:"Warte auf Sensor…",ok1:"{T}° RICHTIG ✔",off:"Abweichung {x}°",w2:"Warte auf Kompass…",ok2:"AUF POLARIS AUSGERICHTET ✔",rr:"Nach RECHTS ↻ {x}°",rl:"Nach LINKS ↺ {x}°",c1:"Aktuelle Neigung: {p}° (Ziel {T}°)\nSeitlich: {e}° (nötig < 0,3°)",c2:"Kurs (wahr Nord): {h}°\nAzimut Polaris: {a}° ({o}° vom Pol)",x1:"⚠ Neigung weicht ab – zurück zu Schritt 1.",x2:"⚠ Missweisung fehlt: Ausrichtung nach magnetisch Nord.",m1:"Sensorzugriff verweigert.",m2:"Keine Sensordaten. Per HTTPS auf dem Handy öffnen und Bewegung erlauben; am Computer den Testmodus nutzen.",cp:"N O S W"},
+ru:{intro:"Полярная настройка трекера по датчикам телефона.\nШаг 1: задать наклон (уровень). Шаг 2: навести на Полярную звезду.",go:"Начать",perm:"Разрешите доступ к датчикам движения/компаса и геолокации.",t1:"Шаг 1 · Наклон",t2:"Шаг 2 · Север",mode:"Красн./День",set:"Настройки",tilt:"Целевой наклон (°)",lat:"Широта (°, С +)",lon:"Долгота (°, В +)",decl:"Склонение (°, В +)",dnote:"Склонение узнайте в калькуляторе NOAA Magnetic Field Calculator. Если неизвестно — 0 (ошибка 0–3°).",demo:"Тестовый режим (без датчиков)",h1:"ШАГ 1 · НАКЛОН {T}°",h2:"ШАГ 2 · НАВЕДЕНИЕ НА ПОЛЯРНУЮ",i1:"Положите телефон (экраном вверх) на полярную ось, верхним краем на север. Меняйте высоту полюса, пока наклон не станет {T}° без бокового крена: пузырёк в центральном круге — верно.",i2:"Оставьте телефон на полярной оси, верхний край на север. Поворачивайте весь трекер/штатив по горизонтали, пока ★ не совпадёт со стрелкой сверху. Держитесь вдали от металла и магнитов.",w1:"Ожидание датчика…",ok1:"{T}° ВЕРНО ✔",off:"Отклонение {x}°",w2:"Ожидание компаса…",ok2:"НАВЕДЕНО НА ПОЛЯРНУЮ ✔",rr:"Поверните ВПРАВО ↻ {x}°",rl:"Поверните ВЛЕВО ↺ {x}°",c1:"Текущий наклон: {p}° (цель {T}°)\nБоковой: {e}° (нужно < 0,3°)",c2:"Курс (истинный север): {h}°\nАзимут Полярной: {a}° ({o}° от полюса)",x1:"⚠ Наклон не совпадает с целью — вернитесь к шагу 1.",x2:"⚠ Склонение не задано: наведение по магнитному северу.",m1:"Доступ к датчикам отклонён.",m2:"Нет данных датчиков. Откройте по HTTPS на телефоне и разрешите движение; на компьютере используйте тестовый режим.",cp:"С В Ю З"},
+ja:{intro:"スマホのセンサーでトラッカーの極軸を合わせます。\nステップ1：傾斜を設定（水準器）。ステップ2：北極星に向けます。",go:"開始",perm:"モーション/コンパスセンサーと位置情報を許可してください。",t1:"ステップ1・傾斜",t2:"ステップ2・北",mode:"赤/昼",set:"設定",tilt:"目標傾斜（°）",lat:"緯度（°、北が＋）",lon:"経度（°、東が＋）",decl:"磁気偏角（°、東が＋）",dnote:"偏角はNOAAのMagnetic Field Calculatorで調べます。不明なら0のまま（誤差0〜3°）。",demo:"テストモード（センサー不要）",h1:"ステップ1・傾斜{T}°に設定",h2:"ステップ2・北極星に向ける",i1:"スマホ（画面を上）を極軸に置き、上端を北に向けます。極軸の高度を調整して傾斜を{T}°にし、左右の傾きをなくします。気泡が中央の円に入れば正解です。",i2:"スマホを極軸に置いたまま、上端を北へ。架台/三脚全体を水平に回し、★を上の矢印に合わせます。金属や磁石から離してください。",w1:"センサー待機中…",ok1:"{T}° 合っています ✔",off:"ずれ {x}°",w2:"コンパス待機中…",ok2:"北極星に合いました ✔",rr:"右へ回す ↻ {x}°",rl:"左へ回す ↺ {x}°",c1:"現在の傾斜：{p}°（目標 {T}°）\n左右のずれ：{e}°（0.3°未満が必要）",c2:"方位（真北）：{h}°\n北極星の方位角：{a}°（極から{o}°）",x1:"⚠ 傾斜が目標からずれています。ステップ1に戻ってください。",x2:"⚠ 偏角が未設定：磁北で合わせています。",m1:"センサーの許可が拒否されました。",m2:"センサーデータがありません。スマホでHTTPS経由で開きモーションを許可してください。PCではテストモードを使います。",cp:"北 東 南 西"},
+ko:{intro:"휴대폰 센서로 트래커의 극축을 맞춥니다.\n1단계: 기울기 설정(수준기). 2단계: 북극성 조준.",go:"시작",perm:"모션/나침반 센서와 위치 접근을 허용하세요.",t1:"1단계 · 기울기",t2:"2단계 · 북쪽",mode:"적색/주간",set:"설정",tilt:"목표 기울기(°)",lat:"위도(°, 북 +)",lon:"경도(°, 동 +)",decl:"편각(°, 동 +)",dnote:"편각은 NOAA Magnetic Field Calculator에서 확인하세요. 모르면 0(오차 0–3°).",demo:"테스트 모드(센서 없음)",h1:"1단계 · 기울기 {T}° 맞추기",h2:"2단계 · 북극성 조준",i1:"휴대폰(화면 위)을 극축 위에 놓고 윗면 가장자리를 북쪽으로 향하게 합니다. 극축 고도를 조절해 기울기를 {T}°로, 좌우 기울기는 0으로 맞추세요. 기포가 가운데 원에 들어오면 정확합니다.",i2:"휴대폰을 극축 위에 둔 채 윗면을 북쪽으로 향합니다. 트래커/삼각대 전체를 수평으로 돌려 ★이 위쪽 화살표와 만나게 하세요. 금속과 자석에서 멀리 두세요.",w1:"센서 대기 중…",ok1:"{T}° 정확 ✔",off:"{x}° 벗어남",w2:"나침반 대기 중…",ok2:"북극성 조준 완료 ✔",rr:"오른쪽으로 ↻ {x}°",rl:"왼쪽으로 ↺ {x}°",c1:"현재 기울기: {p}° (목표 {T}°)\n좌우 오차: {e}° (0.3° 미만 필요)",c2:"방위(진북): {h}°\n북극성 방위각: {a}° (극에서 {o}°)",x1:"⚠ 기울기가 목표와 다릅니다. 1단계로 돌아가세요.",x2:"⚠ 편각 미설정: 자북 기준으로 맞추는 중입니다.",m1:"센서 권한이 거부되었습니다.",m2:"센서 데이터가 없습니다. 휴대폰에서 HTTPS로 열고 모션을 허용하세요. 컴퓨터에서는 테스트 모드를 사용하세요.",cp:"북 동 남 서"},
+th:{intro:"ปรับขั้วฟ้าให้ตัวตามดาวด้วยเซนเซอร์ในมือถือ\nขั้น 1: ตั้งมุมเอียง (ระดับน้ำ) ขั้น 2: เล็งไปที่ดาวเหนือ",go:"เริ่ม",perm:"โปรดอนุญาตเซนเซอร์การเคลื่อนไหว/เข็มทิศ และตำแหน่งที่ตั้ง",t1:"ขั้น 1 · มุมเอียง",t2:"ขั้น 2 · ทิศเหนือ",mode:"แดง/กลางวัน",set:"ตั้งค่า",tilt:"มุมเอียงเป้าหมาย (°)",lat:"ละติจูด (°, เหนือ +)",lon:"ลองจิจูด (°, ตะวันออก +)",decl:"ค่าเบี่ยงเบนแม่เหล็ก (°, ตะวันออก +)",dnote:"ค้นค่าเบี่ยงเบนจาก NOAA Magnetic Field Calculator ถ้าไม่ทราบให้ใส่ 0 (คลาดเคลื่อน 0–3°)",demo:"โหมดทดสอบ (ไม่ใช้เซนเซอร์)",h1:"ขั้น 1 · ตั้งมุมเอียง {T}°",h2:"ขั้น 2 · เล็งดาวเหนือ",i1:"วางมือถือ (หน้าจอขึ้น) บนแกนขั้วฟ้า ให้ขอบบนชี้ไปทางทิศเหนือ ปรับความสูงขั้วจนเอียง {T}° และไม่เอียงซ้าย/ขวา ฟองอากาศอยู่ในวงกลางคือถูกต้อง",i2:"วางมือถือบนแกนขั้วฟ้าต่อไป ขอบบนชี้ทิศเหนือ หมุนตัวตามดาวทั้งชุด/ขาตั้งในแนวราบจนดาว ★ ตรงกับลูกศรด้านบน อยู่ห่างโลหะและแม่เหล็ก",w1:"รอเซนเซอร์…",ok1:"ถูกต้อง {T}° ✔",off:"คลาดเคลื่อน {x}°",w2:"รอเข็มทิศ…",ok2:"เล็งดาวเหนือแล้ว ✔",rr:"หมุนไปทางขวา ↻ {x}°",rl:"หมุนไปทางซ้าย ↺ {x}°",c1:"มุมเอียงปัจจุบัน: {p}° (เป้าหมาย {T}°)\nเอียงข้าง: {e}° (ต้อง < 0.3°)",c2:"ทิศ (เหนือจริง): {h}°\nอะซิมุทของดาวเหนือ: {a}° (ห่างขั้ว {o}°)",x1:"⚠ มุมเอียงคลาดจากเป้าหมาย กลับไปขั้น 1",x2:"⚠ ยังไม่ตั้งค่าเบี่ยงเบน: กำลังใช้ทิศเหนือแม่เหล็ก",m1:"ไม่อนุญาตให้ใช้เซนเซอร์",m2:"ไม่มีข้อมูลเซนเซอร์ เปิดผ่าน HTTPS บนมือถือและอนุญาตการเคลื่อนไหว บนคอมพิวเตอร์ใช้โหมดทดสอบ",cp:"N E S W"},
+id:{intro:"Luruskan sumbu kutub tracker dengan sensor ponsel.\nLangkah 1: atur kemiringan (waterpass). Langkah 2: arahkan ke Polaris.",go:"Mulai",perm:"Izinkan sensor gerak/kompas dan lokasi.",t1:"Langkah 1 · Miring",t2:"Langkah 2 · Utara",mode:"Merah/Siang",set:"Pengaturan",tilt:"Kemiringan target (°)",lat:"Lintang (°, U +)",lon:"Bujur (°, T +)",decl:"Deklinasi magnet (°, T +)",dnote:"Cari deklinasi di NOAA Magnetic Field Calculator. Isi 0 jika tidak tahu (galat 0–3°).",demo:"Mode uji (tanpa sensor)",h1:"LANGKAH 1 · MIRING {T}°",h2:"LANGKAH 2 · ARAHKAN KE POLARIS",i1:"Letakkan ponsel (layar menghadap atas) di sumbu kutub, tepi atas menghadap utara. Atur ketinggian kutub hingga miring {T}° tanpa condong ke samping: gelembung di lingkaran tengah berarti benar.",i2:"Biarkan ponsel di sumbu kutub, tepi atas menghadap utara. Putar seluruh tracker/tripod secara mendatar sampai ★ bertemu panah atas. Jauhi logam dan magnet.",w1:"Menunggu sensor…",ok1:"BENAR {T}° ✔",off:"Selisih {x}°",w2:"Menunggu kompas…",ok2:"TERARAH KE POLARIS ✔",rr:"Putar KANAN ↻ {x}°",rl:"Putar KIRI ↺ {x}°",c1:"Kemiringan saat ini: {p}° (target {T}°)\nSamping: {e}° (harus < 0,3°)",c2:"Arah (utara sejati): {h}°\nAzimut Polaris: {a}° ({o}° dari kutub)",x1:"⚠ Kemiringan melenceng – kembali ke Langkah 1.",x2:"⚠ Deklinasi belum diisi: memakai utara magnetik.",m1:"Izin sensor ditolak.",m2:"Tidak ada data sensor. Buka lewat HTTPS di ponsel dan izinkan gerak; di komputer gunakan mode uji.",cp:"U T S B"},
+fil:{intro:"I-align ang polar axis ng tracker gamit ang sensor ng telepono.\nHakbang 1: itakda ang tilt (bubble level). Hakbang 2: itutok sa Polaris.",go:"Simulan",perm:"Payagan ang motion/compass sensor at lokasyon.",t1:"Hakbang 1 · Tilt",t2:"Hakbang 2 · Hilaga",mode:"Pula/Araw",set:"Mga Setting",tilt:"Target na tilt (°)",lat:"Latitude (°, H +)",lon:"Longitude (°, S +)",decl:"Magnetic declination (°, S +)",dnote:"Hanapin ang declination sa NOAA Magnetic Field Calculator. Iwanang 0 kung hindi alam (mali 0–3°).",demo:"Test mode (walang sensor)",h1:"HAKBANG 1 · {T}° NA TILT",h2:"HAKBANG 2 · ITUTOK SA POLARIS",i1:"Ilagay ang telepono (nakaharap pataas ang screen) sa polar axis, nakaturo sa hilaga ang itaas na gilid. Ayusin ang taas ng polo hanggang {T}° ang tilt at walang tagilid sa gilid: tama kapag nasa gitnang bilog ang bubble.",i2:"Iwan ang telepono sa polar axis, nakaturo sa hilaga ang itaas na gilid. Paikutin nang pahalang ang buong tracker/tripod hanggang magtagpo ang ★ at ang arrow sa itaas. Lumayo sa metal at magnet.",w1:"Naghihintay sa sensor…",ok1:"TAMA ANG {T}° ✔",off:"Lihis ng {x}°",w2:"Naghihintay sa compass…",ok2:"NAKATUTOK SA POLARIS ✔",rr:"Iikot PAKANAN ↻ {x}°",rl:"Iikot PAKALIWA ↺ {x}°",c1:"Kasalukuyang tilt: {p}° (target {T}°)\nTagilid: {e}° (kailangan < 0.3°)",c2:"Direksyon (tunay na hilaga): {h}°\nAzimuth ng Polaris: {a}° ({o}° mula sa polo)",x1:"⚠ Lihis ang tilt – bumalik sa Hakbang 1.",x2:"⚠ Walang declination: magnetic north ang gamit.",m1:"Tinanggihan ang pahintulot sa sensor.",m2:"Walang data ng sensor. Buksan gamit ang HTTPS sa telepono at payagan ang motion; sa computer, gamitin ang test mode.",cp:"H S T K"},
+hi:{intro:"फ़ोन के सेंसर से ट्रैकर का पोलर अलाइनमेंट करें।\nचरण 1: झुकाव सेट करें (बबल लेवल)। चरण 2: ध्रुव तारे की ओर लक्ष्य करें।",go:"शुरू करें",perm:"मोशन/कंपास सेंसर और लोकेशन की अनुमति दें।",t1:"चरण 1 · झुकाव",t2:"चरण 2 · उत्तर",mode:"लाल/दिन",set:"सेटिंग",tilt:"लक्ष्य झुकाव (°)",lat:"अक्षांश (°, उत्तर +)",lon:"देशांतर (°, पूर्व +)",decl:"चुंबकीय अपरदन (°, पूर्व +)",dnote:"अपरदन NOAA के Magnetic Field Calculator से देखें। पता न हो तो 0 रखें (त्रुटि 0–3°)।",demo:"टेस्ट मोड (बिना सेंसर)",h1:"चरण 1 · {T}° झुकाव सेट करें",h2:"चरण 2 · ध्रुव तारे की ओर लक्ष्य",i1:"फ़ोन (स्क्रीन ऊपर) को पोलर एक्सिस पर रखें, ऊपरी किनारा उत्तर की ओर। पोलर ऊँचाई तब तक बदलें जब तक झुकाव {T}° हो और बग़ल में झुकाव न रहे: बबल बीच के घेरे में हो तो सही है।",i2:"फ़ोन को पोलर एक्सिस पर ही रखें, ऊपरी किनारा उत्तर की ओर। पूरे ट्रैकर/ट्राइपॉड को क्षैतिज घुमाएँ जब तक ★ ऊपर के तीर से मिल न जाए। धातु और चुंबक से दूर रखें।",w1:"सेंसर की प्रतीक्षा…",ok1:"{T}° सही ✔",off:"{x}° का अंतर",w2:"कंपास की प्रतीक्षा…",ok2:"ध्रुव तारे पर लक्ष्य सही ✔",rr:"दाएँ घुमाएँ ↻ {x}°",rl:"बाएँ घुमाएँ ↺ {x}°",c1:"वर्तमान झुकाव: {p}° (लक्ष्य {T}°)\nबग़ल का अंतर: {e}° (< 0.3° चाहिए)",c2:"दिशा (सच्चा उत्तर): {h}°\nध्रुव तारे का दिगंश: {a}° (ध्रुव से {o}°)",x1:"⚠ झुकाव लक्ष्य से अलग है – चरण 1 पर लौटें।",x2:"⚠ अपरदन सेट नहीं: चुंबकीय उत्तर पर अलाइन हो रहा है।",m1:"सेंसर की अनुमति अस्वीकार की गई।",m2:"सेंसर डेटा नहीं मिला। फ़ोन पर HTTPS से खोलें और मोशन की अनुमति दें; कंप्यूटर पर टेस्ट मोड इस्तेमाल करें।",cp:"उ पू द प"}
+};
+const NAMES=[['vi','Tiếng Việt'],['en','English'],['fr','Français'],['de','Deutsch'],['ru','Русский'],['ja','日本語'],['ko','한국어'],['th','ไทย'],['id','Bahasa Indonesia'],['fil','Filipino'],['hi','हिन्दी']];
+let LANG='en';try{const v=localStorage.getItem('pa_lang');if(v&&L[v])LANG=v}catch(e){}
+const t=(k,o)=>{let s=L[LANG][k]!=null?L[LANG][k]:L.en[k];if(o)for(const p in o)s=s.split('{'+p+'}').join(o[p]);return s};
+function applyLang(){
+  document.documentElement.lang=LANG;
+  document.querySelectorAll('[data-i]').forEach(e=>e.textContent=t(e.dataset.i));
+  document.querySelectorAll('.langsel').forEach(x=>x.value=LANG);
+  setStep(step);
+}
+document.querySelectorAll('.langsel').forEach(x=>{NAMES.forEach(([c,n])=>x.add(new Option(n,c)));x.onchange=()=>{LANG=x.value;try{localStorage.setItem('pa_lang',LANG)}catch(e){}applyLang()}});
+
+/* ---- giao diện ---- */
+function setStep(s){step=s;$('t1').classList.toggle('on',s==1);$('t2').classList.toggle('on',s==2);
+  const T=val('tilt');
+  $('title').textContent=t(s==1?'h1':'h2',{T:T});
+  $('instr').textContent=t(s==1?'i1':'i2',{T:T});
+  req()}
+$('t1').onclick=()=>setStep(1);$('t2').onclick=()=>setStep(2);
+$('mode').onclick=()=>{const r=document.documentElement;r.dataset.mode=r.dataset.mode==='day'?'night':'day';req()};
+$('tilt').addEventListener('change',()=>setStep(step));
+
+const cv=$('cv'),ctx=cv.getContext('2d');let size=300,dpr=1;
+function resize(){size=Math.min(480,document.querySelector('main').clientWidth);dpr=window.devicePixelRatio||1;
+  cv.width=size*dpr;cv.height=size*dpr;cv.style.width=size+'px';cv.style.height=size+'px';req()}
+window.addEventListener('resize',resize);
+function req(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;update()})}
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function showDiag(){
+  const pre=$('diag');if(!pre||!pre.closest('details').open)return;
+  const f=v=>v==null?'–':(typeof v==='number'?v.toFixed(1):String(v));
+  pre.textContent=['HTTPS: '+(location.protocol==='https:'?'yes':'NO ('+location.protocol+')'),
+    'Standalone: '+(navigator.standalone===true?'yes':'no'),
+    'Motion permission: '+DG.perm,'Orientation events: '+DG.ev,
+    'beta/gamma/alpha: '+f(DG.b)+' / '+f(DG.g)+' / '+f(DG.a),
+    'webkitCompassHeading: '+f(DG.w)+' (acc '+f(DG.wa)+')   absolute: '+f(DG.abs),
+    'Heading source: '+(S.hasH?'OK':'none'),'Geolocation: '+DG.geo].join('\n');
+}
+function drawBubble(cx,cy,r,alpha){
+  const fg=css('--fg'),dim=css('--dim'),okc=css('--ok'),T=val('tilt');
+  const ex=S.tx,ey=S.pitch-T,tot=Math.hypot(ex,ey),ok=S.hasT&&tot<.3,col=ok?okc:fg,R=5;
+  ctx.save();ctx.globalAlpha=alpha;ctx.lineWidth=3;ctx.strokeStyle=step==1?dim:fg;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.stroke();
+  ctx.beginPath();ctx.arc(cx,cy,r/2,0,7);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.lineTo(cx+r,cy);ctx.moveTo(cx,cy-r);ctx.lineTo(cx,cy+r);ctx.stroke();
+  ctx.strokeStyle=col;ctx.lineWidth=5;ctx.beginPath();ctx.arc(cx,cy,r*.3/R,0,7);ctx.stroke();
+  let bx=ex/R,by=-ey/R;const m=Math.hypot(bx,by);if(m>1){bx/=m;by/=m}
+  ctx.globalAlpha=alpha*.8;ctx.fillStyle=col;ctx.beginPath();ctx.arc(cx+bx*r,cy+by*r,r*.09,0,7);ctx.fill();
+  ctx.restore();
+  return{ex,ey,tot,ok,col};
+}
+function update(){
+  showDiag();
+  const fg=css('--fg'),dim=css('--dim'),okc=css('--ok'),T=val('tilt');
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,size,size);
+  const cx=size/2,cy=size/2,r=size*.43;
+  const ro=$('readout'),inf=$('info');
+  const b=drawBubble(cx,cy,r,step==1?1:.28);
+  if(step==1){
+    ro.style.color=b.col;
+    ro.textContent=!S.hasT?t('w1'):b.ok?t('ok1',{T:T}):t('off',{x:b.tot.toFixed(2)});
+    inf.textContent=S.hasT?t('c1',{p:S.pitch.toFixed(2),T:T,e:(b.ex>=0?'+':'')+b.ex.toFixed(2)}):'';
+  }else{
+    const now=Date.now(),lat=val('lat'),lon=val('lon');
+    const mag=Math.atan2(S.sh,S.ch)/D,hd=n360(mag+val('decl')),tg=polarisAz(lat,lon,now),dl=n180(tg-hd);
+    const ok=S.hasH&&Math.abs(dl)<.3,col=ok?okc:fg;
+    ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(cx,cy-r-26);ctx.lineTo(cx-16,cy-r-4);ctx.lineTo(cx+16,cy-r-4);ctx.fill();
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(-hd*D);
+    ctx.strokeStyle=dim;ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,r,0,7);ctx.stroke();
+    for(let a=0;a<360;a+=10){ctx.save();ctx.rotate(a*D);const L=a%90==0?26:a%30==0?18:9;
+      ctx.beginPath();ctx.moveTo(0,-r);ctx.lineTo(0,-r+L);ctx.stroke();ctx.restore()}
+    ctx.fillStyle=fg;ctx.font='bold '+Math.round(r*.15)+'px system-ui';ctx.textAlign='center';
+    t('cp').split(' ').map((s,i)=>[s,i*90]).forEach(([s,a])=>{ctx.save();ctx.rotate(a*D);ctx.fillText(s,0,-r+26+r*.13);ctx.restore()});
+    ctx.save();ctx.rotate(tg*D);ctx.fillStyle=col;ctx.strokeStyle=col;ctx.lineWidth=4;
+    ctx.beginPath();ctx.arc(0,-r*.62,r*.07,0,7);ctx.fill();ctx.beginPath();ctx.moveTo(0,-r*.55);ctx.lineTo(0,-r*.9);ctx.stroke();ctx.restore();
+    ctx.restore();
+    ro.style.color=col;
+    ro.textContent=!S.hasH?t('w2'):ok?t('ok2'):dl>0?t('rr',{x:dl.toFixed(1)}):t('rl',{x:(-dl).toFixed(1)});
+    let tt=t('c2',{h:hd.toFixed(1),a:tg.toFixed(2),o:polarisOffset(now).toFixed(2)});
+    if(S.hasT&&Math.hypot(S.tx,S.pitch-val('tilt'))>=3)tt+='\n'+t('x1');
+    if(!val('decl'))tt+='\n'+t('x2');
+    inf.textContent=tt;
+  }
+}
+applyLang();resize();
+if('serviceWorker' in navigator&&location.protocol.indexOf('http')==0)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
